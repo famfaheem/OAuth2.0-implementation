@@ -1,2 +1,126 @@
-# OAuth2.0-implementation
-Accessing top 10 emails from Gmail using OAuth2.0
+i am building a basic Gmail inbox and message viewing app using the Gmail RESTful API. The purpose of this article  was to understand the OAuth 2.0.
+
+<h2>Enabling the Gmail API on Your Google Account</h2>
+
+First off, we need to enable Gmail API access to get our API credentials. To do this, we need to visit Google’s Developer Console in our favourite web browser. From there, we need to create a project (or choose an existing one) and go to the APIs section. Choose “Gmail API” under the Google Apps APIs section and click the “Enable API” button.
+
+Now we need to create two sets of credentials, one for an OAuth 2.0 client ID for a web application and the other to create a browser API key. This can be done in the credentials section of the Google Developer Console by clicking the “Add Credentials” button.
+
+For the browser API key we need to only fill in the “name” field. For the OAuth 2.0 client ID we must enter at least one authorized JavaScript origin. For a local development environment this will likely be http://localhost or similar.
+
+Once we’ve filled in the necessary fields we should be able to see our credentials back in the Credentials section. 
+
+<h2>Connecting to the Gmail API </h2>
+
+i created an HTML file which i am going to use as the base of my app. For the purpose of this app we’re going to include all of our code in a single HTML file.
+
+Right at the bottom (above the closing </body> tag) is where we include Google’s JavaScript client library. 
+Other than that we’ve got a button which will allow the user to authorize us to access their Gmail account, and we’ve also stubbed out a table to hold our inbox data once we fetch it.
+
+<h2>Authenticating the User</h2>
+
+Now we’re going to provide a mechanism for the user to authenticate us to access their Gmail account. As mentioned above, we need to build out a function named handleClientLoad() which will automatically be called once Google’s JavaScript client library has loaded into the page. This function will then call a chain of other functions which will eventually lead us to fetching their inbox.
+
+To summarise the process this chain of function calls goes through:
+
+<b>handleClientLoad()</b> simply sets the API key and passes off to checkAuth() after 1 millisecond.
+<b>checkAuth()</b> checks if the user has previously authenticated our app with Google. Setting the immediate parameter to true here means that we do not prompt the user with a login/permissions modal if they are not authenticated. We then pass the authentication result to handleAuthResult().
+<b>handleAuthResult()</b> then does one of two things; if the user is already authenticated it’ll load the Gmail API using loadGmailApi(), alternatively it’ll display the authorize button on the UI and attach a click event to it which will trigger handleAuthClick()
+<b>handleAuthClick()</b> simply executes the same authentication function as checkAuth() but will present the user with a login/permissions modal. Once the user authenticates the same handleAuthResult() function from before is triggered.
+Once those series of functions have been executed and the user has authenticated we should always find ourselves at the loadGmailApi() function. This simply loads the Gmail API functionality from Google’s JavaScript client library and then calls our displayInbox() function.
+
+<h2>Fetching and Displaying the User’s Inbox</h2>
+Now that we’ve got the user authenticated we can proceed to displaying some of their data using our displayInbox() function. We need to build out that function with the following components;
+
+First off we need to fetch a list of messages from Gmail. To do that we need to call the Users.messages: list endpoint. For the purpose of this app we’re going to request the last ten messages marked as INBOX:
+
+function displayInbox() {
+  var request = gapi.client.gmail.users.messages.list({
+    'userId': 'me',
+    'labelIds': 'INBOX',
+    'maxResults': 10
+  });
+
+  request.execute(function(response) {
+    $.each(response.messages, function() {
+      var messageRequest = gapi.client.gmail.users.messages.get({
+        'userId': 'me',
+        'id': this.id
+      });
+
+      messageRequest.execute(appendMessageRow);
+    });
+  });
+}
+This will return a JSON object containing the ids of the last ten messages received by the authenticated user, along with some other peripheral data which we don’t need. Note that we can use the special userId of me to indicate the currently authenticated user. As with all API requests made using Google’s library, requests should be assigned to a variable and then the execute() function should be called to actually make the request. This function takes a callback function as it’s parameter, and allows you to specify a parameter to save the response to.
+
+We’re actually making two API requests here as unfortunately, the list API endpoint returns only the message ids, but not the actual message data. So inside our callback function we need to loop through each message and request more data specific to that message. To do that we need to call the User.messages: get endpoint to fetch a single message by it’s id, and pass the response over to another function, appendMessageRow().
+
+Now we’ve got the message data we’re finally ready to modify the DOM and show the user something!
+
+function appendMessageRow(message) {
+  $('.table-inbox tbody').append(
+    '<tr>\
+      <td>'+getHeader(message.payload.headers, 'From')+'</td>\
+      <td>'+getHeader(message.payload.headers, 'Subject')+'</td>\
+      <td>'+getHeader(message.payload.headers, 'Date')+'</td>\
+    </tr>'
+  );
+}
+We’re making use of jQuery’s append() function here to append rows containing the message data to the HTML table we stubbed out earlier. This should leave us with a working app which can show the user the last ten messages from their inbox! But it’s not much use if you can’t actually read the email, right?
+
+<h2>Displaying the Email Message Content</h2>
+Since we’ve already got the message content from our Users.messages: get request there’s no need to make any more API requests to display this data. We simply need to build a mechanism into our existing code to facilitate displaying the existing data we have previously fetched.
+
+To do this we need to start off by adding a method for launching the message content viewer. So we’re going to modify the appendMessageRow() code from above to add a link to the subject table cell.
+
+function appendMessageRow(message) {
+  $('.table-inbox tbody').append(
+    '<tr>\
+      <td>'+getHeader(message.payload.headers, 'From')+'</td>\
+      <td>\
+        <a href="#message-modal-' + message.id +
+          '" data-toggle="modal" id="message-link-' + message.id+'">' +
+          getHeader(message.payload.headers, 'Subject') +
+        '</a>\
+      </td>\
+      <td>'+getHeader(message.payload.headers, 'Date')+'</td>\
+    </tr>'
+  );
+}
+This is making use of Bootstrap’s modal functionality to launch a pre-defined modal window when the link is clicked. So now we need to make another modification to the code to also build a modal window container in the DOM each time we insert the message summary into the table. So we simply add this snippet under our previous append() snippet.
+
+$('body').append(
+  '<div class="modal fade" id="message-modal-' + message.id +
+      '" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">\
+    <div class="modal-dialog modal-lg">\
+      <div class="modal-content">\
+        <div class="modal-header">\
+          <button type="button"\
+                  class="close"\
+                  data-dismiss="modal"\
+                  aria-label="Close">\
+            <span aria-hidden="true">&times;</span></button>\
+          <h4 class="modal-title" id="myModalLabel">' +
+            getHeader(message.payload.headers, 'Subject') +
+          '</h4>\
+        </div>\
+        <div class="modal-body">\
+          <iframe id="message-iframe-'+message.id+'" srcdoc="<p>Loading...</p>">\
+          </iframe>\
+        </div>\
+      </div>\
+    </div>\
+  </div>'
+);
+
+
+So now we’ve got a table of message details and a modal window with a blank content panel, so it’s time to implement the actual message content display mechanism. Inside that same function we need to attach an on click event to our subject cell links to render the contents of the iframe once the message modal is requested.
+
+$('#message-link-'+message.id).on('click', function(){
+  var ifrm = $('#message-iframe-'+message.id)[0].contentWindow.document;
+  $('body', ifrm).html(getBody(message.payload));
+});
+This simply accesses the iframe (which is already present in the DOM) and injects our message HTML into its <body> element. A small workaround is required in order to achieve this functionality.
+
+Thank You
